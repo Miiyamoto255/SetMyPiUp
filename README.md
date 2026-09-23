@@ -1,8 +1,9 @@
 # SetMyPiUp 🍓
 
-Professional, production-ready Raspberry Pi 5 setup script.
+Professional, production-ready Raspberry Pi 5 setup script (v1.1.0).
 Pick the apps you want from a menu — one failed install never breaks the rest —
 then the Pi reboots so kernel / Docker / Waydroid / overclock changes take effect.
+Re-run anytime: after each round you're asked "Do you want to install anything else?".
 
 - **Script:** `SetMyPiUp.sh` (Bash, no dependencies beyond a stock Pi OS)
 - **Target:** Raspberry Pi 5, Raspberry Pi OS 64-bit (Debian Bookworm or newer)
@@ -11,6 +12,8 @@ then the Pi reboots so kernel / Docker / Waydroid / overclock changes take effec
 ## Quick start
 
 ```bash
+git clone https://github.com/Miiyamoto255/SetMyPiUp.git
+cd ~/SetMyPiUp
 chmod +x SetMyPiUp.sh
 sudo ./SetMyPiUp.sh                  # interactive menu (recommended)
 ```
@@ -22,11 +25,14 @@ sudo ./SetMyPiUp.sh --all --yes                    # everything, no prompts
 sudo ./SetMyPiUp.sh --only git,docker,vscode,fastfetch --no-reboot
 sudo ./SetMyPiUp.sh --all --exclude pihole,retropie --yes
 ./SetMyPiUp.sh --list                              # show installable IDs
-./SetMyPiUp.sh --dry-run --all                     # show what would happen
+./SetMyPiUp.sh --dry-run --all                     # show what would happen. Good for testing
+sudo ./SetMyPiUp.sh --with-overclock --oc-cpu 2700 --oc-gpu 950
+sudo ./SetMyPiUp.sh --force                        # force running on x86_64 or on non-Pi devices 
 ```
 
-> The script must run as root (`sudo`). Per-user tools (Pi-Apps, OpenCode,
-> npm globals excluded) are installed for `${SUDO_USER}` automatically.
+> The script must run as root (`sudo`). Per-user tools are installed for
+> `${SUDO_USER}` automatically. Preflight checks (arch, OS, internet, disk,
+> Pi 5 identity) run first — bypass aborts only with `--force`.
 
 ## What gets installed
 
@@ -37,12 +43,12 @@ sudo ./SetMyPiUp.sh --all --exclude pihole,retropie --yes
 | `python` | Python3 + pip + venv + pipx | APT |
 | `flatpak` | Flatpak + Flathub | APT + `flatpak remote-add` |
 | `pi-apps` | Pi-Apps store | `Botspot/pi-apps` clone (per-user) |
-| `brave` | Brave Browser | Official `brave-browser-apt-release` ARM64 repo |
-| `vscode` | VS Code | Official Microsoft `code` ARM64 repo |
+| `brave` | Brave Browser | Pi-Apps first, official ARM64 repo fallback |
+| `vscode` | VS Code | Pi OS APT (`code`) first, Microsoft repo fallback (Pi-Apps only has VSCodium — deliberately not used) |
 | `chromium` | Chromium | APT |
 | `nodejs` | Node.js 22 LTS + npm | NodeSource ARM64 |
-| `docker` | Docker Engine | Official `get.docker.com`, user added to `docker` group |
-| `pihole` | Pi-hole | Official installer, `--unattended` (+ confirmation) |
+| `docker` | Docker Engine | Official Docker APT repo (`docker-ce` suite); convenience script only as fallback |
+| `pihole` | Pi-hole | Official installer, auto-detected interface/IP (never `0.0.0.0`), confirm before running |
 | `libreoffice` / `kodi` / `vlc` / `gimp` | Desktop apps | APT |
 | `obs` | OBS Studio | APT, Flatpak fallback |
 | `qemu` | QEMU + virt-manager | APT |
@@ -51,17 +57,17 @@ sudo ./SetMyPiUp.sh --all --exclude pihole,retropie --yes
 | `dotnet` | .NET SDK 8.0 | Microsoft Debian 12 feed, script fallback |
 | `fastfetch` | Fastfetch | APT, GitHub `.deb` fallback |
 | `adb` | ADB + Fastboot | APT, `plugdev` group |
-| `prismlauncher` | PrismLauncher | Pi-Apps first (as requested), Flatpak fallback |
+| `prismlauncher` | PrismLauncher | Pi-Apps "Minecraft Java Prism Launcher" first, Flatpak fallback |
 | `dolphin` | Dolphin Emulator | APT, Flatpak fallback |
-| `eden` | Eden Switch Emulator | Flatpak `io.github.eden_emu.eden`, AppImage fallback |
+| `eden` | Eden Switch Emulator | Flatpak `dev.eden_emu.eden`, AppImage fallback (git.eden-emu.dev) |
 | `steam` | Steam (x86 via Box64) | Pi-Apps automation (handles Box86/Box64) |
 | `retropie` | RetroPie | Clones `RetroPie-Setup` (full build is manual — takes hours) |
-| `waydroid` | Waydroid | `repo.waydro.id` + `waydroid init` (VANILLA) + kernel tweaks ↓ |
-| `mcpi-reborn` | MCPI: Reborn (TheBrokenRail) | Pi-Apps first, Gitea `.deb` fallback |
+| `waydroid` | Waydroid | `repo.waydro.id` + `waydroid init` (VANILLA) + kernel tweaks ↓ (init failure = FAILED, with retry hint) |
+| `mcpi-reborn` | MCPI: Reborn (TheBrokenRail) | Official Gitea APT repo first, Pi-Apps fallback |
 | `llamacpp` | llama.cpp | Built from source (`ggerganov/llama.cpp`, ARM NEON) |
-| `opencode` | OpenCode | Official `opencode.ai/install`, npm fallback |
+| `opencode` | OpenCode | Official `opencode.ai/install` (pinned dir + version check), `opencode-ai@latest` npm fallbacks |
 | `claude-code` | Claude Code | `npm i -g @anthropic-ai/claude-code` |
-| `sunshine` | Sunshine host + Moonlight client | LizardByte ARM64 `.deb` + Flatpak Moonlight |
+| `sunshine` | Sunshine host + Moonlight client | LizardByte ARM64 `.deb` (+ Flatpak host fallback) + Flatpak Moonlight — BOTH required for success |
 
 ## Waydroid kernel tweaks (automatic with `waydroid`)
 
@@ -82,40 +88,67 @@ systemctl status waydroid-container
 waydroid session start
 ```
 
-## Overclock — Pi 5 ONLY, optional
+## Overclock — Pi 5 ONLY, optional, conservative
 
-Offered separately after app installation (or forced/skipped via flags):
+Offered separately after app installation (or forced/skipped via flags).
+Defaults are a mild **2600MHz CPU / 900MHz GPU** — you can accept them or
+type your own values (validated: CPU 2400–2800, GPU 800–1000):
 
 ```bash
-sudo ./SetMyPiUp.sh --with-overclock    # apply without asking
+sudo ./SetMyPiUp.sh --with-overclock    # apply without asking (defaults)
 sudo ./SetMyPiUp.sh --no-overclock      # never apply
+sudo ./SetMyPiUp.sh --with-overclock --oc-cpu 2700 --oc-gpu 950
 ```
 
-- CPU `arm_freq=2700`, GPU `gpu_freq=1000`, `over_voltage_delta=50000`
+- Extra voltage (`over_voltage_delta=50000`) is added only above 2600MHz CPU.
+- Settings above 2700 CPU / 950 GPU trigger an additional aggressive warning.
 - Written as a managed, idempotent `# SetMyPiUp-OC` block in `config.txt`
-  (timestamped backup kept; re-runs replace the block, never duplicate it).
+  (timestamped backup kept every time, even on re-runs).
 - **Refused on anything that isn't a Raspberry Pi 5** (checked via
   `/proc/device-tree/model`) — the script logs an error and continues.
-- ⚠️ **Requires active cooling** (official Active Cooler recommended).
-  Verify after reboot: `vcgencmd measure_clock arm` and watch
-  `vcgencmd measure_temp` under load.
+- ⚠️ **Requires good cooling** (official Active Cooler recommended).
+  Verify after reboot: `vcgencmd measure_clock arm` + `vcgencmd measure_temp`.
 
 ## Safety / production-ready design
 
+- **Preflight first:** architecture (aarch64), OS release, internet
+  (4 endpoints + TCP fallback), free disk (2GB abort / 10GB warn), Pi 5
+  identity. Aborts are overridable with `--force`, skipped in `--dry-run`.
 - **Failure isolation:** `set -uo pipefail`, deliberately **no `set -e`**.
   Every installer is wrapped by `run_installer()` — failures are logged,
   recorded for the summary, and the run continues.
+- **Honest reporting:** Waydroid fails if `waydroid init` fails; Sunshine
+  fails unless BOTH host and client install (missing half named).
 - **Re-runnable:** each installer fast-paths when already installed;
   repo additions, config edits and Flatpak remotes are idempotent.
-- **Backups:** every privileged file edit keeps a
-  `*.setmypiup-bak-<timestamp>` copy.
+  Config backups are taken before EVERY modification with
+  nanosecond+PID-unique names.
+- **Install-only philosophy:** the script never finishes app setup for you.
+  Passwords, pairing, logins and API keys are listed under NEXT STEPS.
 - **Logging:** everything to `/var/log/setmypiup.log`
   (override with `--log-file PATH`); console shows concise colored status.
-- **Reboot:** prompted at the end (required for kernel/Docker/Waydroid/OC).
+- **Summary:** `SUCCESS / FAILED / SKIPPED` counts with dash lists, NEXT
+  STEPS reminders, boot-file notes and the log path.
+- **Reboot:** prompted at the end (required for kernel/Docker/Waydroid/Overclocking).
   `--no-reboot` skips, `--reboot` reboots without prompting,
   `--dry-run` never reboots and never changes anything.
 - **Menu:** `whiptail` → `dialog` → plain-text fallback, plus full CLI
-  (`--all`, `--only`, `--exclude`, `--yes`) for automation.
+  (`--all`, `--only`, `--exclude`, `--yes`) with one shared exclusion
+  filter so every interface behaves identically.
+- **Re-run loop:** after each round you're asked "Do you want to install
+  anything else?" — the script is the permanent installer entry point.
+
+## Compatibility
+
+-You can run it in x86_x64/ARM64 Linux or WSL, BUT only for testing. On Linux, install using the commands up in Quick Start with the --force flag. For Windows 10/11, you need WSL activated. When activated, run these commands :
+
+```bash
+wsl.exe --install Ubuntu
+git clone https://github.com/Miiyamoto255/SetMyPiUp.git
+cd ~/SetMyPiUp
+chmod +x SetMyPiUp.sh
+sudo ./SetMyPiUp.sh --force
+```
 
 ## Troubleshooting
 
