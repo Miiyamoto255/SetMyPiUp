@@ -1,6 +1,6 @@
 # SetMyPiUp 🍓
 
-Professional, production-ready Raspberry Pi 5 setup script (v1.1.0).
+Professional, production-ready Raspberry Pi 5 setup script (v1.3.0).
 Pick the apps you want from a menu — one failed install never breaks the rest —
 then the Pi reboots so kernel / Docker / Waydroid / overclock changes take effect.
 Re-run anytime: after each round you're asked "Do you want to install anything else?".
@@ -28,6 +28,8 @@ sudo ./SetMyPiUp.sh --all --exclude pihole,retropie --yes
 ./SetMyPiUp.sh --dry-run --all                     # show what would happen. Good for testing
 sudo ./SetMyPiUp.sh --with-overclock --oc-cpu 2700 --oc-gpu 950
 sudo ./SetMyPiUp.sh --force                        # force running on x86_64 or on non-Pi devices 
+sudo ./SetMyPiUp.sh --only pihole --allow-network-changes   # Pi-hole needs this opt-in when non-interactive
+sudo ./SetMyPiUp.sh --only dotnet --dotnet-version 9.0 --no-reboot
 ```
 
 > The script must run as root (`sudo`). Per-user tools are installed for
@@ -46,15 +48,15 @@ sudo ./SetMyPiUp.sh --force                        # force running on x86_64 or 
 | `brave` | Brave Browser | Pi-Apps first, official ARM64 repo fallback |
 | `vscode` | VS Code | Pi OS APT (`code`) first, Microsoft repo fallback (Pi-Apps only has VSCodium — deliberately not used) |
 | `chromium` | Chromium | APT |
-| `nodejs` | Node.js 22 LTS + npm | NodeSource ARM64 |
+| `nodejs` | Node.js LTS (default 22) + npm | NodeSource ARM64 (`--node-major` to change) |
 | `docker` | Docker Engine | Official Docker APT repo (`docker-ce` suite); convenience script only as fallback |
-| `pihole` | Pi-hole | Official installer, auto-detected interface/IP (never `0.0.0.0`), confirm before running |
+| `pihole` | Pi-hole | Official installer, auto-detected interface/IP (strict CIDR check, never `0.0.0.0`), confirm before running. Non-interactive runs SKIP it unless `--allow-network-changes` is passed |
 | `libreoffice` / `kodi` / `vlc` / `gimp` | Desktop apps | APT |
 | `obs` | OBS Studio | APT, Flatpak fallback |
 | `qemu` | QEMU + virt-manager | APT |
 | `snapd` | snapd | APT, service enabled |
-| `java` | OpenJDK 17 + 21 | APT |
-| `dotnet` | .NET SDK 8.0 | Microsoft Debian 12 feed, script fallback |
+| `java` | OpenJDK LTS (default 17 + 21) | APT (`--java-versions` to change) |
+| `dotnet` | .NET SDK (default 8.0) | Codename-aware Microsoft feed (12/13), script fallback (`--dotnet-version 9.0`) |
 | `fastfetch` | Fastfetch | APT, GitHub `.deb` fallback |
 | `adb` | ADB + Fastboot | APT, `plugdev` group |
 | `prismlauncher` | PrismLauncher | Pi-Apps "Minecraft Java Prism Launcher" first, Flatpak fallback |
@@ -68,17 +70,36 @@ sudo ./SetMyPiUp.sh --force                        # force running on x86_64 or 
 | `opencode` | OpenCode | Official `opencode.ai/install` (pinned dir + version check), `opencode-ai@latest` npm fallbacks |
 | `claude-code` | Claude Code | `npm i -g @anthropic-ai/claude-code` |
 | `sunshine` | Sunshine host + Moonlight client | LizardByte ARM64 `.deb` (+ Flatpak host fallback) + Flatpak Moonlight — BOTH required for success |
+| `fnf` | Friday Night Funkin' | Pi-Apps Shadow Engine (preferred) / Rewritten |
+| `steamlink` | Steam Link | Pi-Apps first, official APT fallback |
+| `scrcpy` | scrcpy | Pi-Apps first, APT fallback (pulls in ADB tools) |
+| `godot` | Godot Engine | Pi-Apps first, official Linux arm64 editor fallback |
+| `blender` | Blender | Pi-Apps candidate, official Debian package |
+| `ruffle` | Ruffle (Flash emulator) | Flathub first, official ARM64 tarball fallback |
+| `celeste64` | Celeste 64 | Pi-Apps native ARM build (not Celeste Classic — different game) |
+| `ppsspp` | PPSSPP (PSP) | Pi-Apps first, APT fallback |
+| `freetube` | FreeTube | Pi-Apps first, official arm64 `.deb` fallback |
+| `audacity` | Audacity | Pi-Apps first, APT fallback |
+| `sonicpi` | Sonic Pi | APT, upstream arm64 `.deb` fallback (a live-coding *music synth* — not a code editor) |
+| `doom3` | Doom 3 | Pi-Apps first, dhewm3 engine via APT (you supply the pak files) |
+| `btop` / `thunderbird` / `filezilla` / `gparted` | System tools | APT (GParted ships with a backup warning) |
+| `supertuxkart` / `minetest` / `retroarch` / `zeroad` | Games | APT |
+| `wine` | Wine (x64 on 64-bit OS) | Pi-Apps only (Box86/Box64 build is intertwined) |
 
 ## Waydroid kernel tweaks (automatic with `waydroid`)
 
-On Pi 5 / Bookworm the default 16K-page kernel breaks Waydroid's binder.
-Selecting `waydroid` applies, idempotently and with timestamped backups:
+On Pi / Bookworm the default 16K-page kernel breaks Waydroid's binder.
+Selecting `waydroid` applies, idempotently, atomically (stage + rename)
+and with a mandatory timestamped backup before every edit:
 
 1. **`psi=1`** appended to `cmdline.txt`
    (`/boot/firmware/cmdline.txt`, legacy fallback `/boot/cmdline.txt` —
    file stays a single line).
 2. **4K pages** via `kernel=kernel8.img` in `config.txt`
    (`/boot/firmware/config.txt`, legacy fallback `/boot/config.txt`).
+
+Skipped automatically on non-Pi hardware and with `--no-waydroid-tweaks`.
+A failed image init (`waydroid init`) counts as FAILED with a retry hint.
 
 Reboot afterwards, then:
 
@@ -119,24 +140,35 @@ sudo ./SetMyPiUp.sh --with-overclock --oc-cpu 2700 --oc-gpu 950
   recorded for the summary, and the run continues.
 - **Honest reporting:** Waydroid fails if `waydroid init` fails; Sunshine
   fails unless BOTH host and client install (missing half named).
-- **Re-runnable:** each installer fast-paths when already installed;
-  repo additions, config edits and Flatpak remotes are idempotent.
-  Config backups are taken before EVERY modification with
-  nanosecond+PID-unique names.
+  Result codes are centralized: `0` = installed, `2` = skipped, else failed.
+- **Re-runnable + self-updating:** each installer fast-paths when already
+  installed; repo additions, config edits and Flatpak remotes are idempotent.
+  Already-installed apps get an **update check** (`apt --only-upgrade`,
+  `flatpak update`, `npm update -g`, `manage update`, `git pull`, even a
+  llama.cpp rebuild-if-changed) — selecting an installed app updates it,
+  then the run continues with the rest.
+  Config backups are MANDATORY before every edit (abort otherwise),
+  atomic (stage + rename), with nanosecond+PID-unique names.
+- **Verified installs:** Git/Python/Node/Java/.NET/OpenCode are verified by
+  actually executing them (`--version` probes), not just PATH presence.
 - **Install-only philosophy:** the script never finishes app setup for you.
   Passwords, pairing, logins and API keys are listed under NEXT STEPS.
 - **Logging:** everything to `/var/log/setmypiup.log`
   (override with `--log-file PATH`); console shows concise colored status.
-- **Summary:** `SUCCESS / FAILED / SKIPPED` counts with dash lists, NEXT
-  STEPS reminders, boot-file notes and the log path.
-- **Reboot:** prompted at the end (required for kernel/Docker/Waydroid/Overclocking).
-  `--no-reboot` skips, `--reboot` reboots without prompting,
+- **Summary:** `SUCCESS / FAILED / SKIPPED` counts with dash lists,
+  copy-paste `--only` retry line with the failed IDs, NEXT STEPS reminders,
+  reboot reasons and the log path.
+- **Reboot:** prompted at the end, naming WHY (kernel/overclock/etc.).
+  `--no-reboot` skips, `--reboot` forces (even with failures),
+  bare `--yes` does NOT auto-reboot when anything failed,
   `--dry-run` never reboots and never changes anything.
 - **Menu:** `whiptail` → `dialog` → plain-text fallback, plus full CLI
-  (`--all`, `--only`, `--exclude`, `--yes`) with one shared exclusion
-  filter so every interface behaves identically.
-- **Re-run loop:** after each round you're asked "Do you want to install
-  anything else?" — the script is the permanent installer entry point.
+  (`--all`, `--only`, `--exclude`, `--yes`) with one shared,
+  case/space-insensitive exclusion filter so every interface behaves
+  identically. `--only` is always one-shot.
+- **Re-run loop:** after each interactive menu round you're asked "Do you
+  want to install anything else?" — the script is the permanent installer
+  entry point.
 
 ## Compatibility
 
